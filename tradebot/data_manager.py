@@ -1,8 +1,22 @@
-# data_manager: read/write history/trades/orders to disk (parquet/csv)
-import os
-def ensure_dirs():
-    os.makedirs('data/master', exist_ok=True)
-    os.makedirs('data/history', exist_ok=True)
-    os.makedirs('data/trades', exist_ok=True)
-    os.makedirs('data/orders', exist_ok=True)
-ensure_dirs()
+import pandas as pd
+
+def clean_orderbook(data):
+    """Clean orderbook data for display."""
+    df = pd.DataFrame(data)
+    if not df.empty:
+        df = df[["order_id", "tradingsymbol", "order_type", "quantity", "price", "order_status"]]
+    return df
+
+def clean_positions(data):
+    """Clean positions data."""
+    df = pd.DataFrame(data)
+    if not df.empty:
+        df = df[["tradingsymbol", "net_qty", "avg_price", "last_price", "pnl"]]
+    return df
+
+def clean_holdings(data):
+    """Clean holdings data."""
+    df = pd.DataFrame(data)
+    if not df.empty:
+        df = df[["tradingsymbol", "quantity", "avg_price", "last_price", "pnl"]]
+    return df

@@ -7,3 +7,4 @@ pandas_ta
 sqlalchemy
 apscheduler
 pyarrow
+pyotp

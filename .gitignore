@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+venv/
+.envrc
+.ipynb_checkpoints/
+
+# Data
+data/
+logs/
+*.parquet
+
+# Streamlit secrets (never commit real secrets)
+.streamlit/secrets.toml

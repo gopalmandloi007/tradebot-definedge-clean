@@ -1,0 +1,9 @@
+streamlit
+requests
+PyGithub
+pandas
+numpy
+pandas_ta
+sqlalchemy
+apscheduler
+pyarrow

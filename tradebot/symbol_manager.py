@@ -1,70 +1,46 @@
 import os
+import requests
 import pandas as pd
+from tradebot.session_manager import get_api_session
 
-# Cache for master symbols
-_symbol_df = None
+BASE_URL = "https://data.definedgesecurities.com/sds/symbols"
 
-def load_symbols(file_path: str = "data/symbol_master.csv") -> pd.DataFrame:
+def download_symbols(segment: str, save: bool = True) -> pd.DataFrame:
     """
-    Load symbol master file into a DataFrame.
-    Handles 14 or 15 columns automatically.
-    Caches the result in memory for performance.
+    Download symbol-token mapping for given segment (e.g., NSE, NFO).
+    Saves to data/symbol/{segment}_symbols.csv
     """
-    global _symbol_df
-    if _symbol_df is not None:
-        return _symbol_df
+    folder = os.path.join("data", "symbol")
+    os.makedirs(folder, exist_ok=True)
+    filename = os.path.join(folder, f"{segment}_symbols.csv")
 
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"❌ Symbol master file not found: {file_path}")
+    session = get_api_session()
+    headers = {"Authorization": session}
+    url = f"{BASE_URL}/{segment}"
 
-    # Try loading with different column counts
-    try:
-        df = pd.read_csv(file_path, header=None, dtype=str)
-    except Exception as e:
-        raise RuntimeError(f"❌ Failed to read symbol file: {e}")
+    response = requests.get(url, headers=headers)
+    if response.status_code != 200:
+        raise Exception(f"❌ Failed to fetch symbols: {response.text}")
 
-    # Normalize columns
-    col_count = df.shape[1]
-    if col_count == 14:
-        df.columns = [
-            "EXCH", "TOKEN", "SYMBOL", "NAME", "INSTRUMENT",
-            "EXPIRY", "LOT_SIZE", "STRIKE", "OPTION_TYPE",
-            "UNDERLYING", "TICK_SIZE", "MULTIPLIER",
-            "ISIN", "EXTRA"
-        ]
-    elif col_count == 15:
-        df.columns = [
-            "EXCH", "TOKEN", "SYMBOL", "NAME", "INSTRUMENT",
-            "EXPIRY", "LOT_SIZE", "STRIKE", "OPTION_TYPE",
-            "UNDERLYING", "TICK_SIZE", "MULTIPLIER",
-            "ISIN", "EXTRA", "DESCRIPTION"
-        ]
-    else:
-        raise ValueError(f"❌ Unexpected column count in master file: {col_count}")
+    df = pd.DataFrame(response.json())
 
-    _symbol_df = df
-    print(f"✅ Loaded {len(df)} symbols with {col_count} columns")
-    return _symbol_df
+    if save:
+        df.to_csv(filename, index=False)
+        print(f"✅ Symbol list saved: {filename}")
+
+    return df
 
 
-def search_symbols(query: str, max_results: int = 10) -> pd.DataFrame:
+def get_token(symbol: str, segment: str = "NSE") -> str:
     """
-    Search for symbols by keyword in SYMBOL, NAME, or DESCRIPTION.
-    Returns top `max_results`.
+    Get token for a given symbol (from cached CSV).
     """
-    df = load_symbols()
+    filename = os.path.join("data", "symbol", f"{segment}_symbols.csv")
+    if not os.path.exists(filename):
+        raise FileNotFoundError(f"⚠️ Symbol file missing: {filename}. Run download_symbols('{segment}') first.")
 
-    query = str(query).upper()
-    search_cols = [col for col in ["SYMBOL", "NAME", "DESCRIPTION"] if col in df.columns]
-
-    if not search_cols:
-        raise KeyError("❌ No searchable column (SYMBOL/NAME/DESCRIPTION) found in master file")
-
-    mask = pd.Series(False, index=df.index)
-    for col in search_cols:
-        mask |= df[col].astype(str).str.contains(query, na=False, case=False)
-
-    results = df[mask].head(max_results)
-    if results.empty:
-        print(f"⚠️ No results found for query: {query}")
-    return results
+    df = pd.read_csv(filename)
+    row = df[df["symbol"] == symbol]
+    if row.empty:
+        raise ValueError(f"❌ Symbol {symbol} not found in {segment} symbols.")
+    return str(row.iloc[0]["token"])

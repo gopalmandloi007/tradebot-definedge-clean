@@ -1,58 +1,56 @@
 import logging
-from tradebot.api_client import APIClient
-from tradebot.historical_data import HistoricalDataManager
+from .api_client import APIClient
+from .historical_data import HistoricalDataManager
 
 logger = logging.getLogger(__name__)
 
 class HoldingsManager:
-    def __init__(self, api_client: APIClient, historical_data_manager: HistoricalDataManager):
+    def __init__(self, api_client: APIClient, historical_manager: HistoricalDataManager):
         self.api_client = api_client
-        self.historical_data_manager = historical_data_manager
+        self.historical_manager = historical_manager
 
     def get_holdings(self):
-        """Fetch holdings from API"""
+        """
+        Fetch holdings from API and enrich with LTP & Previous Close.
+        """
         url = "/holdings"
         response = self.api_client.get(url)
+
         if response.get("status") != "SUCCESS":
-            logger.error(f"Error fetching holdings: {response}")
+            logger.error("Failed to fetch holdings: %s", response)
             return []
-        return response.get("data", [])
 
-    def enrich_holdings(self, holdings):
-        """Add LTP and Previous Close for each holding"""
-        enriched = []
-        for h in holdings:
-            for symbol in h["tradingsymbol"]:
-                exchange = symbol["exchange"]
-                token = symbol["token"]
+        final_holdings = []
 
-                # ✅ Get LTP from /quotes
-                quote_url = f"/quotes/{exchange}/{token}"
-                quote_data = self.api_client.get(quote_url)
+        for h in response.get("data", []):
+            for sym in h.get("tradingsymbol", []):
+                exchange = sym.get("exchange")
+                token = sym.get("token")
+                symbol_name = sym.get("tradingsymbol")
+
+                # Step 1: Get LTP (Quotes API)
+                quote_resp = self.api_client.get(f"/quotes/{exchange}/{token}")
                 ltp = None
-                if quote_data.get("status") == "SUCCESS":
-                    ltp = quote_data.get("data", {}).get("ltp")
+                if quote_resp.get("status") == "SUCCESS":
+                    ltp = quote_resp["data"].get("ltp")
 
-                # ✅ Get Previous Close from Historical Data
-                prev_close = self.historical_data_manager.get_previous_close(exchange, token)
+                # Step 2: Get Previous Close (Historical API)
+                prev_close = self.historical_manager.get_previous_close(exchange, token)
 
-                enriched.append({
+                # Step 3: Append processed holding
+                holding = {
                     "exchange": exchange,
-                    "symbol": symbol["tradingsymbol"],
+                    "symbol": symbol_name,
                     "token": token,
-                    "isin": symbol["isin"],
-                    "avg_buy_price": h.get("avg_buy_price"),
-                    "dp_qty": h.get("dp_qty"),
-                    "t1_qty": h.get("t1_qty"),
-                    "holding_used": h.get("holding_used"),
-                    "trade_qty": h.get("trade_qty"),
-                    "sell_amt": h.get("sell_amt"),
+                    "isin": sym.get("isin"),
+                    "avg_buy_price": float(h.get("avg_buy_price", 0)),
+                    "dp_qty": int(h.get("dp_qty", 0)),
+                    "t1_qty": int(h.get("t1_qty", 0)),
                     "ltp": ltp,
-                    "previous_close": prev_close
-                })
-        return enriched
+                    "prev_close": prev_close
+                }
 
-    def get_enriched_holdings(self):
-        """Complete flow: holdings + LTP + prev_close"""
-        raw_holdings = self.get_holdings()
-        return self.enrich_holdings(raw_holdings)
+                final_holdings.append(holding)
+
+        logger.info("Processed %d holdings", len(final_holdings))
+        return final_holdings

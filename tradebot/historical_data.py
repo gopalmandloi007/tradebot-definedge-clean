@@ -3,68 +3,63 @@ import requests
 import pandas as pd
 from datetime import datetime
 from tradebot.session_manager import get_api_session
+from tradebot.symbol_manager import get_token
 
 BASE_URL = "https://data.definedgesecurities.com/sds/history"
 
-def get_history(
-    segment: str,
-    token: str,
-    timeframe: str,
-    from_date: str,
-    to_date: str,
-    save: bool = True
-) -> pd.DataFrame:
+def build_url(segment: str, token: str, timeframe: str, from_date: str, to_date: str) -> str:
     """
-    Fetch historical data and save it incrementally (no duplicates).
+    Build historical data API URL
+    Dates must be in ddMMyyyyHHmm format
     """
+    return f"{BASE_URL}/{segment}/{token}/{timeframe}/{from_date}/{to_date}"
 
-    # ✅ Folder structure
-    folder = os.path.join("data", "historical", segment)
+
+def download_historical(symbol: str, segment: str, timeframe: str,
+                        from_date: datetime, to_date: datetime, save: bool = True) -> pd.DataFrame:
+    """
+    Download historical data for given symbol and save in data/historical/{segment}_{symbol}_{timeframe}.csv
+    - symbol: e.g. RELIANCE
+    - segment: NSE / NFO etc.
+    - timeframe: day / minute / tick
+    - from_date, to_date: datetime objects
+    """
+    folder = os.path.join("data", "historical")
     os.makedirs(folder, exist_ok=True)
-    filename = os.path.join(folder, f"{token}_{timeframe}.csv")
+    filename = os.path.join(folder, f"{segment}_{symbol}_{timeframe}.csv")
 
-    # ✅ Agar file pehle se hai to last datetime padho
-    if os.path.exists(filename):
-        existing_df = pd.read_csv(filename)
-        if timeframe in ["day", "minute"]:
-            last_date = existing_df["datetime"].iloc[-1]
-            # API ke format me convert (ddMMyyyyHHmm)
-            last_dt = datetime.strptime(last_date, "%Y-%m-%d %H:%M:%S")
-            from_date = last_dt.strftime("%d%m%Y%H%M")
-        elif timeframe == "tick":
-            last_utc = existing_df["utc"].iloc[-1]
-            # Tick data UTC seconds hota hai → API me direct use nahi hota
-            # is case me hum manually range define karenge
-            # abhi ke liye user se diya hua from_date hi use hoga
-    else:
-        existing_df = None
+    # Convert dates to required format ddMMyyyyHHmm
+    from_str = from_date.strftime("%d%m%Y%H%M")
+    to_str = to_date.strftime("%d%m%Y%H%M")
 
-    # ✅ API request
+    # Token lookup
+    token = get_token(symbol, segment)
+
     session = get_api_session()
     headers = {"Authorization": session}
-    url = f"{BASE_URL}/{segment}/{token}/{timeframe}/{from_date}/{to_date}"
+    url = build_url(segment, token, timeframe, from_str, to_str)
+
     response = requests.get(url, headers=headers)
-
     if response.status_code != 200:
-        raise Exception(f"❌ Failed to fetch data: {response.text}")
+        raise Exception(f"❌ Failed to fetch historical data: {response.text}")
 
-    # ✅ Response parse
+    # Convert CSV text to DataFrame
+    from io import StringIO
+    df = pd.read_csv(StringIO(response.text), header=None)
+
+    # Timeframe wise column mapping
     if timeframe in ["day", "minute"]:
-        cols = ["datetime", "open", "high", "low", "close", "volume", "oi"]
-    else:  # tick
-        cols = ["utc", "ltp", "ltq", "oi"]
+        df.columns = ["datetime", "open", "high", "low", "close", "volume", "oi"]
+    elif timeframe == "tick":
+        df.columns = ["utc", "ltp", "ltq", "oi"]
 
-    df = pd.read_csv(pd.compat.StringIO(response.text), names=cols)
+    # Avoid duplicates if file already exists
+    if os.path.exists(filename):
+        old_df = pd.read_csv(filename)
+        df = pd.concat([old_df, df], ignore_index=True).drop_duplicates().reset_index(drop=True)
 
-    # ✅ Agar pehle ka data tha to merge + remove duplicates
-    if existing_df is not None:
-        df = pd.concat([existing_df, df])
-        df.drop_duplicates(subset=cols[0], keep="last", inplace=True)
-        df.reset_index(drop=True, inplace=True)
-
-    # ✅ Save
     if save:
         df.to_csv(filename, index=False)
-        print(f"✅ Data saved: {filename}")
+        print(f"✅ Historical data saved: {filename}")
 
     return df
